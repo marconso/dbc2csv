@@ -1,0 +1,9 @@
+[package]
+name = "dbc2csv"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+datasus-dbc = "0.1.1"
+dbase = "0.6.1"
+ftp = "3.0.1"
