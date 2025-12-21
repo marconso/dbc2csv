@@ -1,39 +1,112 @@
-name: Build and Test Rust
+name: Build & Release (Rust + MUSL)
 
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # Use an Ubuntu runner to handle most cross-compilation
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # Define target triplets for different platforms/architectures
-        target:
-          - x86_64-unknown-linux-gnu
-          - x86_64-pc-windows-gnu
-          - x86_64-apple-darwin
-          # Add ARM targets if needed (requires Linux runner for cross-compilation)
-          # - aarch64-unknown-linux-gnu
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact: linux-musl
+            use_cross: true
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: macos
+            use_cross: false
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows
+            use_cross: false
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust Toolchain (if needed)
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }} # Install target for cross-compiling
-          profile: minimal
+          target: ${{ matrix.target }}
           override: true
-      - name: Build with `cross` (for Linux/Windows/Mac targets)
-        # The action handles installation and uses `cross` for targets not native to runner
-        uses: houseabsolute/actions-rust-cross@v0
-        with:
-          target: ${{ matrix.target }}
-          command: build
-          args: --release --locked
-      - name: Test with `cross`
-        uses: houseabsolute/actions-rust-cross@v0
-        with:
-          target: ${{ matrix.target }}
-          command: test
-          args: --locked
 
+      - name: Install cross (Linux MUSL)
+        if: matrix.use_cross
+        run: cargo install cross --locked
+
+      - name: Build with cross (MUSL)
+        if: matrix.use_cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build with cargo
+        if: ${{ !matrix.use_cross }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare release directory
+        run: mkdir -p release
+
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          BIN_NAME=$(basename $(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].targets[] | select(.kind[]=="bin") | .name'))
+          cp target/${{ matrix.target }}/release/$BIN_NAME release/
+          tar -czf release/${BIN_NAME}-${{ matrix.artifact }}-${{ github.ref_name }}.tar.gz -C release $BIN_NAME
+        shell: bash
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $bin = (cargo metadata --no-deps --format-version=1 | ConvertFrom-Json).packages[0].targets | Where-Object { $_.kind -contains "bin" } | Select-Object -First 1 -ExpandProperty name
+          Copy-Item "target\\${{ matrix.target }}\\release\\$bin.exe" release\
+          Compress-Archive -Path "release\\$bin.exe" -DestinationPath "release\\$bin-windows-${{ github.ref_name }}.zip"
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release/*
+
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        id: release
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPLOAD_URL: ${{ steps.release.outputs.upload_url }}
+        run: |
+          UPLOAD_URL="${UPLOAD_URL%\{*}"
+          for f in artifacts/*/*; do
+            echo "Uploading $f"
+            curl -s -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$UPLOAD_URL?name=$(basename $f)"
+          done
