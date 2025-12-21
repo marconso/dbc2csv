@@ -1,5 +1,8 @@
 name: Build & Release (Rust + MUSL)
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -90,6 +93,8 @@ jobs:
       - name: Create GitHub Release
         uses: actions/create-release@v1
         id: release
+        env:
+          GITHUB_TOKEN: ${{ github.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
           release_name: Release ${{ github.ref_name }}
