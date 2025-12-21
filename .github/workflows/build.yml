@@ -1,0 +1,39 @@
+name: Build and Test Rust
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # Use an Ubuntu runner to handle most cross-compilation
+    strategy:
+      matrix:
+        # Define target triplets for different platforms/architectures
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-pc-windows-gnu
+          - x86_64-apple-darwin
+          # Add ARM targets if needed (requires Linux runner for cross-compilation)
+          # - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust Toolchain (if needed)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }} # Install target for cross-compiling
+          profile: minimal
+          override: true
+      - name: Build with `cross` (for Linux/Windows/Mac targets)
+        # The action handles installation and uses `cross` for targets not native to runner
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --release --locked
+      - name: Test with `cross`
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          target: ${{ matrix.target }}
+          command: test
+          args: --locked
+
