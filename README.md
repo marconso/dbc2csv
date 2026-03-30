@@ -10,3 +10,5 @@ Esse programa baixa o arquivo direto do diretório dentro do ftpdatasus e extrai
 
 
 ![demo](./demo.gif)
+
+#Créditos para [`@mymatsubara`](https://github.com/mymatsubara) pela dependencia datasus-dbc
